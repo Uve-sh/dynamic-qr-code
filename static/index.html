@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dynamic QR Code Studio - Private Project Manager</title>
+  <meta name="description" content="Generate and manage dynamic transparent QR codes with QRID, Order ID tracking, and PDF/SVG/PNG export.">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+  <div class="bg-grid-overlay"></div>
+
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-section">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-title">
+          <h1>Dynamic QR Studio</h1>
+          <div class="brand-tagline">
+            <span>Project & Order QR Code Manager</span>
+            <span class="private-badge">🔒 Private Project Tool</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btnOpenConfig" class="btn btn-secondary btn-sm" title="Configure Redirect Base URL">
+          <span>🌐</span> Host Config
+        </button>
+        <button id="btnBatchPdf" class="btn btn-secondary btn-sm" title="Download Printable Sticker Grid Sheet">
+          <span>📄</span> Batch PDF Sheet
+        </button>
+        <button id="btnOpenCreate" class="btn btn-primary">
+          <span>➕</span> Create Dynamic QR
+        </button>
+      </div>
+    </header>
+
+    <!-- Stats Bar -->
+    <section class="stats-grid" id="statsGrid">
+      <div class="stat-card">
+        <div class="stat-icon blue">⚡</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statTotalQr">0</div>
+          <div class="stat-label">Dynamic QR Codes</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green">✅</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statActiveQr">0</div>
+          <div class="stat-label">Active Redirects</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon purple">📊</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statTotalScans">0</div>
+          <div class="stat-label">Total Scans Recorded</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon cyan">📦</div>
+        <div class="stat-info">
+          <div class="stat-value" id="statTotalOrders">0</div>
+          <div class="stat-label">Unique Orders Tracked</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filter & Search Bar -->
+    <section class="controls-bar">
+      <div class="search-box">
+        <span>🔍</span>
+        <input type="text" id="searchInput" placeholder="Search by QRID, Order ID, Title, or Destination URL...">
+      </div>
+      <div class="filter-group">
+        <select id="statusFilter" class="select-styled">
+          <option value="">All Statuses</option>
+          <option value="active">Active Only</option>
+          <option value="paused">Paused Only</option>
+        </select>
+        <select id="sortFilter" class="select-styled">
+          <option value="newest">Newest First</option>
+          <option value="scans">Most Scanned</option>
+          <option value="order">Order ID (A-Z)</option>
+          <option value="title">Title (A-Z)</option>
+        </select>
+        <button id="btnRefresh" class="btn btn-secondary btn-icon" title="Refresh List">
+          🔄
+        </button>
+      </div>
+    </section>
+
+    <!-- QR Codes Grid -->
+    <main id="qrGrid" class="qr-grid">
+      <!-- Populated dynamically via JS -->
+      <div class="empty-state">
+        <div class="empty-icon">⏳</div>
+        <h3>Loading Dynamic QR Codes...</h3>
+        <p>Connecting to local database.</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- ==================== CREATE MODAL ==================== -->
+  <div class="modal-overlay" id="createModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2>⚡ Create New Dynamic QR Code</h2>
+        <button class="btn-close" id="btnCloseCreate">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="inputQrId">QR ID (Permanent Identifier) *</label>
+            <div class="input-with-action">
+              <input type="text" id="inputQrId" class="form-input" placeholder="e.g. QR-8X9B2" required>
+              <button type="button" id="btnAutoGenerateQrId" class="btn btn-secondary btn-sm" title="Generate New Unique ID">⚡ Auto</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="inputOrderId">Order ID (For Tracking & Search)</label>
+            <input type="text" id="inputOrderId" class="form-input" placeholder="e.g. ORD-2026-8841">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="inputTitle">Title / Project Label *</label>
+          <input type="text" id="inputTitle" class="form-input" placeholder="e.g. Summer Campaign Flyer / Product Box #10" required>
+        </div>
+
+        <div class="form-group">
+          <label for="inputTargetUrl">Destination Target URL * (Updatable Anytime)</label>
+          <input type="url" id="inputTargetUrl" class="form-input" placeholder="https://yourwebsite.com/destination" required>
+          <small style="color: var(--text-muted); font-size: 0.78rem;">The QR code will encode a permanent dynamic redirect. You can change this destination URL whenever you want without re-printing!</small>
+        </div>
+
+        <!-- Style Customization -->
+        <div class="form-row">
+          <div class="form-group">
+            <label>QR Code Color</label>
+            <div class="color-picker-row">
+              <div class="color-swatch active" data-color="#000000" style="background: #000000;" title="Deep Black"></div>
+              <div class="color-swatch" data-color="#6366f1" style="background: #6366f1;" title="Electric Indigo"></div>
+              <div class="color-swatch" data-color="#10b981" style="background: #10b981;" title="Emerald Green"></div>
+              <div class="color-swatch" data-color="#06b6d4" style="background: #06b6d4;" title="Cyan Tech"></div>
+              <div class="color-swatch" data-color="#ef4444" style="background: #ef4444;" title="Ruby Red"></div>
+              <input type="color" id="inputCustomColor" value="#000000" style="width: 32px; height: 32px; border: none; background: transparent; cursor: pointer;" title="Custom Color">
+            </div>
+          </div>
+          <div class="form-group" style="justify-content: center;">
+            <label class="switch-label">
+              <input type="checkbox" id="inputTransparentBg" checked>
+              <span><strong>Transparent Background</strong> (No White Box)</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Live Preview -->
+        <div class="live-preview-box">
+          <div class="preview-canvas-holder">
+            <img id="createPreviewImg" alt="Live QR Preview" src="" style="display: none;">
+            <span id="createPreviewPlaceholder" style="font-size: 0.75rem; color: var(--text-muted); text-align: center;">Live Preview</span>
+          </div>
+          <div class="preview-details">
+            <p><strong>Transparent Preview:</strong> The checkerboard pattern behind the QR code proves the background is 100% transparent alpha.</p>
+            <p style="font-size: 0.8rem; color: #38bdf8;">Encodes: <span id="createPreviewUrl">-</span></p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="inputNotes">Internal Notes (Optional)</label>
+          <input type="text" id="inputNotes" class="form-input" placeholder="e.g. Printed for Client X shipment">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnCancelCreate">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnSubmitCreate">Create Dynamic QR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== EDIT DESTINATION MODAL ==================== -->
+  <div class="modal-overlay" id="editModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2>✏️ Edit Destination URL</h2>
+        <button class="btn-close" id="btnCloseEdit">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+          Update the destination for <strong id="editModalQrid" style="color: #6366f1;"></strong>. The printed QR code will <strong>never change</strong>, but scanners will now be instantly routed to this new URL.
+        </p>
+
+        <div class="form-group">
+          <label for="editTitle">Title / Label</label>
+          <input type="text" id="editTitle" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label for="editOrderId">Order ID</label>
+          <input type="text" id="editOrderId" class="form-input">
+        </div>
+
+        <div class="form-group">
+          <label for="editTargetUrl">New Destination URL *</label>
+          <input type="url" id="editTargetUrl" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label for="editStatus">Status</label>
+          <select id="editStatus" class="select-styled" style="width: 100%;">
+            <option value="active">Active (Redirecting normally)</option>
+            <option value="paused">Paused (Show paused notice to scanners)</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnCancelEdit">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnSaveEdit">Save Updates</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== HOST CONFIG MODAL ==================== -->
+  <div class="modal-overlay" id="configModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h2>🌐 Host & Domain Configuration</h2>
+        <button class="btn-close" id="btnCloseConfig">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color: var(--text-secondary); font-size: 0.9rem;">
+          Dynamic QR codes redirect through this server. Set the base URL so when your phone scans the QR code, it can reach this machine over Wi-Fi or your public domain.
+        </p>
+        <div class="form-group">
+          <label for="configBaseUrl">Dynamic Redirect Base URL</label>
+          <input type="text" id="configBaseUrl" class="form-input" placeholder="e.g. http://192.168.1.15:8000 or https://qr.yourdomain.com">
+        </div>
+        <div style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: var(--radius-sm); padding: 12px;">
+          <div style="font-size: 0.8rem; color: #a5b4fc; margin-bottom: 6px;">💡 <strong>Quick Suggestions:</strong></div>
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" id="btnUseLanIp" class="btn btn-secondary btn-sm" style="font-family: var(--font-mono);">
+              Use Local Wi-Fi IP (<span id="lanIpDisplay">loading...</span>)
+            </button>
+            <button type="button" id="btnUseLocalhost" class="btn btn-secondary btn-sm" style="font-family: var(--font-mono);">
+              Use localhost:8000
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" id="btnCancelConfig">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnSaveConfig">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
