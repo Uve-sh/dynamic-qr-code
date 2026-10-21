@@ -34,6 +34,23 @@
         <button id="btnOpenCreate" class="btn btn-primary">
           <span>➕</span> Create Dynamic QR
         </button>
+
+        <!-- Auth state elements -->
+        <div id="authGuestSection" style="display: none;">
+          <button id="btnOpenAuth" class="btn btn-secondary btn-sm">
+            <span>🔑</span> Sign In
+          </button>
+        </div>
+        <div id="authUserSection" class="user-pill" style="display: none;">
+          <div class="user-avatar" id="userAvatar">U</div>
+          <div class="user-details">
+            <span class="user-name" id="userNameDisplay">User</span>
+            <span class="user-role-badge" id="userRoleBadge">Member</span>
+          </div>
+          <button id="btnLogout" class="btn-logout" title="Sign Out">
+            <span>🚪</span>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -254,6 +271,69 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" id="btnCancelConfig">Cancel</button>
         <button type="button" class="btn btn-primary" id="btnSaveConfig">Save Configuration</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== AUTH MODAL (LOGIN & SIGN UP) ==================== -->
+  <div class="modal-overlay" id="authModal">
+    <div class="modal-box" style="max-width: 440px;">
+      <div class="modal-header">
+        <div>
+          <h2 id="authModalTitle">Welcome to QR Studio</h2>
+          <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 4px;">Sign in to access your private team QR codes.</p>
+        </div>
+        <button class="btn-close" id="btnCloseAuth">&times;</button>
+      </div>
+
+      <!-- Auth Tabs -->
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" id="tabSignIn">Sign In</button>
+        <button type="button" class="auth-tab" id="tabSignUp">Create Account</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Sign In Form -->
+        <form id="formSignIn" onsubmit="return false;">
+          <div class="form-group">
+            <label for="loginIdentifier">Username or Email *</label>
+            <input type="text" id="loginIdentifier" class="form-input" placeholder="e.g. alex or alex@company.com" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="loginPassword">Password *</label>
+            <input type="password" id="loginPassword" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary" id="btnSubmitLogin" style="margin-top: 10px; width: 100%;">
+            <span>🚀</span> Sign In
+          </button>
+        </form>
+
+        <!-- Sign Up Form -->
+        <form id="formSignUp" onsubmit="return false;" style="display: none;">
+          <div class="form-group">
+            <label for="regUsername">Username *</label>
+            <input type="text" id="regUsername" class="form-input" placeholder="e.g. alex_studio" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="regFullName">Full Name (Optional)</label>
+            <input type="text" id="regFullName" class="form-input" placeholder="e.g. Alex Johnson">
+          </div>
+          <div class="form-group">
+            <label for="regEmail">Email Address *</label>
+            <input type="email" id="regEmail" class="form-input" placeholder="e.g. alex@company.com" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label for="regPassword">Password * (min 6 characters)</label>
+            <input type="password" id="regPassword" class="form-input" placeholder="••••••••" minlength="6" required autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn btn-primary" id="btnSubmitRegister" style="margin-top: 10px; width: 100%;">
+            <span>✨</span> Create My Account
+          </button>
+        </form>
+
+        <div class="auth-footer-notice">
+          🔒 <strong>Team Isolation:</strong> Each team member's QR codes and analytics are kept strictly private to their own account.
+        </div>
       </div>
     </div>
   </div>

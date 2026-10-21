@@ -2,15 +2,18 @@ import socket
 import os
 import secrets
 import string
-from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, Response, Query
+from typing import Optional, Dict, Any
+from fastapi import FastAPI, HTTPException, Request, Response, Query, Depends
 from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from backend.database import (
     init_db, get_db, list_qrcodes, get_qrcode_by_id, 
     create_qrcode, update_qrcode, delete_qrcode, 
-    record_scan, get_stats, get_setting, set_setting
+    record_scan, get_stats, get_setting, set_setting,
+    create_user, get_user_by_id, get_user_by_identifier,
+    count_users, create_session, get_user_by_session_token,
+    delete_session, verify_password
 )
 from backend.qr_engine import (
     generate_transparent_png, 
@@ -22,7 +25,7 @@ from backend.qr_engine import (
 # Initialize DB on load
 init_db()
 
-app = FastAPI(title="Dynamic QR Code Manager", version="1.0.0")
+app = FastAPI(title="Dynamic QR Code Manager", version="1.1.0")
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
 if not os.path.exists(STATIC_DIR):
@@ -47,6 +50,18 @@ def get_base_url(request: Request) -> str:
     host = request.headers.get("host", "localhost:8000")
     proto = request.headers.get("x-forwarded-proto", "http")
     return f"{proto}://{host}".rstrip("/")
+
+# ==================== AUTH MODELS & DEPENDENCIES ====================
+
+class UserRegister(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: Optional[str] = ""
+
+class UserLogin(BaseModel):
+    identifier: str
+    password: str
 
 class QRCodeCreate(BaseModel):
     qr_id: Optional[str] = None
@@ -75,11 +90,108 @@ def generate_random_qrid(length: int = 6) -> str:
     chars = "".join(secrets.choice(alphabet) for _ in range(length))
     return f"QR-{chars}"
 
-# ==================== DYNAMIC REDIRECT ENDPOINT ====================
+async def get_current_user_optional(request: Request) -> Optional[Dict[str, Any]]:
+    auth_header = request.headers.get("Authorization", "")
+    token = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    elif "qr_token" in request.cookies:
+        token = request.cookies.get("qr_token")
+    
+    if not token:
+        return None
+    return get_user_by_session_token(token)
+
+async def get_current_user(request: Request) -> Dict[str, Any]:
+    user = await get_current_user_optional(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required. Please log in.")
+    return user
+
+# ==================== AUTHENTICATION ENDPOINTS ====================
+
+@app.post("/api/auth/register")
+async def register(payload: UserRegister, response: Response):
+    username = payload.username.strip().lower()
+    email = payload.email.strip().lower()
+    password = payload.password.strip()
+
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="Username must be at least 3 characters.")
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+    if "@" not in email:
+        raise HTTPException(status_code=400, detail="A valid email address is required.")
+
+    if get_user_by_identifier(username):
+        raise HTTPException(status_code=400, detail=f"Username '{username}' is already taken.")
+    if get_user_by_identifier(email):
+        raise HTTPException(status_code=400, detail=f"Account with email '{email}' already exists.")
+
+    is_first_user = count_users() == 0
+    role = "admin" if is_first_user else "member"
+
+    user = create_user(username, email, password, full_name=payload.full_name or "", role=role)
+
+    # If first user, link existing orphan QR codes to this account
+    if is_first_user:
+        conn = get_db()
+        conn.cursor().execute("UPDATE qrcodes SET user_id = ? WHERE user_id IS NULL OR user_id = 1", (user["id"],))
+        conn.commit()
+        conn.close()
+
+    token = create_session(user["id"])
+    response.set_cookie(key="qr_token", value=token, httponly=True, samesite="lax", max_age=30*86400)
+    return {"status": "success", "token": token, "user": user}
+
+@app.post("/api/auth/login")
+async def login(payload: UserLogin, response: Response):
+    user = get_user_by_identifier(payload.identifier)
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid username/email or password.")
+
+    token = create_session(user["id"])
+    response.set_cookie(key="qr_token", value=token, httponly=True, samesite="lax", max_age=30*86400)
+    return {
+        "status": "success",
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "email": user["email"],
+            "full_name": user["full_name"],
+            "role": user["role"],
+            "created_at": user["created_at"]
+        }
+    }
+
+@app.get("/api/auth/me")
+async def get_me(request: Request):
+    user = await get_current_user_optional(request)
+    if not user:
+        return {"authenticated": False, "user": None}
+    return {"authenticated": True, "user": user}
+
+@app.post("/api/auth/logout")
+async def logout(request: Request, response: Response):
+    auth_header = request.headers.get("Authorization", "")
+    token = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    elif "qr_token" in request.cookies:
+        token = request.cookies.get("qr_token")
+
+    if token:
+        delete_session(token)
+    response.delete_cookie(key="qr_token")
+    return {"status": "success", "message": "Logged out successfully."}
+
+# ==================== DYNAMIC REDIRECT ENDPOINT (PUBLIC) ====================
 @app.get("/r/{qr_id}")
 async def redirect_qr(qr_id: str, request: Request):
     """The dynamic QR code permanent redirect endpoint.
-    Scanners hit this URL, and are instantly redirected to the destination URL."""
+    Scanners hit this URL, and are instantly redirected to the destination URL.
+    This endpoint remains 100% public without login."""
     item = get_qrcode_by_id(qr_id)
     if not item:
         return HTMLResponse(
@@ -150,10 +262,10 @@ async def redirect_qr(qr_id: str, request: Request):
 
     return RedirectResponse(url=target_url, status_code=307)
 
-# ==================== API ENDPOINTS ====================
+# ==================== PROTECTED API ENDPOINTS ====================
 
 @app.get("/api/suggest-id")
-async def suggest_id():
+async def suggest_id(user: Dict[str, Any] = Depends(get_current_user)):
     """Generates an available unique QRID suggestion."""
     for _ in range(10):
         candidate = generate_random_qrid(6)
@@ -166,21 +278,26 @@ async def get_all_qrcodes(
     search: Optional[str] = "",
     order: Optional[str] = "",
     status: Optional[str] = "",
-    request: Request = None
+    request: Request = None,
+    user: Dict[str, Any] = Depends(get_current_user)
 ):
-    items = list_qrcodes(search=search, order_filter=order, status_filter=status)
+    items = list_qrcodes(user_id=user["id"], search=search, order_filter=order, status_filter=status)
     base = get_base_url(request)
     for it in items:
         it["redirect_url"] = f"{base}/r/{it['qr_id']}"
     return items
 
 @app.post("/api/qrcodes")
-async def create_new_qrcode(payload: QRCodeCreate, request: Request):
+async def create_new_qrcode(
+    payload: QRCodeCreate,
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
     qr_id = payload.qr_id.strip() if payload.qr_id else ""
     if not qr_id:
         qr_id = generate_random_qrid(6)
     
-    # Check duplicate
+    # Check duplicate globally across all QR codes
     if get_qrcode_by_id(qr_id):
         raise HTTPException(status_code=400, detail=f"QR ID '{qr_id}' is already taken. Please choose another.")
     
@@ -190,6 +307,7 @@ async def create_new_qrcode(payload: QRCodeCreate, request: Request):
         raise HTTPException(status_code=400, detail="Target Destination URL is required.")
 
     created = create_qrcode(
+        user_id=user["id"],
         qr_id=qr_id,
         title=payload.title,
         target_url=payload.target_url,
@@ -204,8 +322,12 @@ async def create_new_qrcode(payload: QRCodeCreate, request: Request):
     return created
 
 @app.get("/api/qrcodes/{qr_id}")
-async def get_single_qrcode(qr_id: str, request: Request):
-    item = get_qrcode_by_id(qr_id)
+async def get_single_qrcode(
+    qr_id: str,
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    item = get_qrcode_by_id(qr_id, user_id=user["id"])
     if not item:
         raise HTTPException(status_code=404, detail="QR Code not found.")
     base = get_base_url(request)
@@ -213,13 +335,19 @@ async def get_single_qrcode(qr_id: str, request: Request):
     return item
 
 @app.put("/api/qrcodes/{qr_id}")
-async def update_single_qrcode(qr_id: str, payload: QRCodeUpdate, request: Request):
-    existing = get_qrcode_by_id(qr_id)
+async def update_single_qrcode(
+    qr_id: str,
+    payload: QRCodeUpdate,
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    existing = get_qrcode_by_id(qr_id, user_id=user["id"])
     if not existing:
-        raise HTTPException(status_code=404, detail="QR Code not found.")
+        raise HTTPException(status_code=404, detail="QR Code not found or access denied.")
 
     updated = update_qrcode(
         qr_id=qr_id,
+        user_id=user["id"],
         title=payload.title,
         target_url=payload.target_url,
         order_id=payload.order_id,
@@ -233,11 +361,14 @@ async def update_single_qrcode(qr_id: str, payload: QRCodeUpdate, request: Reque
     return updated
 
 @app.delete("/api/qrcodes/{qr_id}")
-async def delete_single_qrcode(qr_id: str):
-    existing = get_qrcode_by_id(qr_id)
+async def delete_single_qrcode(
+    qr_id: str,
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    existing = get_qrcode_by_id(qr_id, user_id=user["id"])
     if not existing:
-        raise HTTPException(status_code=404, detail="QR Code not found.")
-    delete_qrcode(qr_id)
+        raise HTTPException(status_code=404, detail="QR Code not found or access denied.")
+    delete_qrcode(qr_id, user_id=user["id"])
     return {"status": "success", "message": f"QR Code {qr_id} deleted."}
 
 # ==================== EXPORT & DOWNLOAD ENDPOINTS ====================
@@ -323,9 +454,14 @@ async def download_pdf(qr_id: str, request: Request):
     )
 
 @app.get("/api/batch/pdf")
-async def download_batch_pdf(request: Request, search: Optional[str] = "", order: Optional[str] = ""):
-    """Generates a batch sticker/label PDF sheet of multiple QR codes."""
-    items = list_qrcodes(search=search, order_filter=order)
+async def download_batch_pdf(
+    request: Request,
+    search: Optional[str] = "",
+    order: Optional[str] = "",
+    user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Generates a batch sticker/label PDF sheet of multiple QR codes for the logged-in user."""
+    items = list_qrcodes(user_id=user["id"], search=search, order_filter=order)
     if not items:
         raise HTTPException(status_code=400, detail="No QR codes found to generate batch PDF.")
 
@@ -339,11 +475,11 @@ async def download_batch_pdf(request: Request, search: Optional[str] = "", order
     )
 
 @app.get("/api/stats")
-async def stats():
-    return get_stats()
+async def stats(user: Dict[str, Any] = Depends(get_current_user)):
+    return get_stats(user_id=user["id"])
 
 @app.get("/api/config")
-async def get_config(request: Request):
+async def get_config(request: Request, user: Dict[str, Any] = Depends(get_current_user)):
     configured = get_setting("base_url", "")
     auto_detected = f"http://{get_local_ip()}:8000"
     current_host = get_base_url(request)
@@ -355,7 +491,7 @@ async def get_config(request: Request):
     }
 
 @app.post("/api/config")
-async def update_config(payload: SettingUpdate):
+async def update_config(payload: SettingUpdate, user: Dict[str, Any] = Depends(get_current_user)):
     url = payload.base_url.strip().rstrip("/")
     set_setting("base_url", url)
     return {"status": "success", "base_url": url}

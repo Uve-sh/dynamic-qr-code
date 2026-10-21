@@ -950,3 +950,126 @@ header.app-header {
     height: 180px;
   }
 }
+
+/* ===================================================================
+   USER PROFILE PILL & AUTH MODAL STYLES
+   =================================================================== */
+
+.user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 4px 12px 4px 6px;
+  backdrop-filter: blur(8px);
+  transition: all var(--trans-fast);
+}
+
+.user-pill:hover {
+  border-color: var(--border-highlight);
+  background: rgba(30, 41, 59, 0.9);
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background: var(--accent-gradient);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+
+.user-details {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.user-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.user-role-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: #a5b4fc;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.btn-logout {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  transition: all var(--trans-fast);
+  margin-left: 4px;
+}
+
+.btn-logout:hover {
+  color: var(--danger);
+  transform: scale(1.1);
+}
+
+/* Auth Modal Tabs */
+.auth-tabs {
+  display: flex;
+  background: rgba(11, 16, 26, 0.8);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  margin: 16px 24px 0 24px;
+  border: 1px solid var(--border-subtle);
+  gap: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--trans-fast);
+  font-family: var(--font-main);
+}
+
+.auth-tab.active {
+  background: var(--accent-gradient);
+  color: #ffffff;
+  box-shadow: var(--shadow-sm);
+}
+
+.auth-tab:not(.active):hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.auth-footer-notice {
+  margin-top: 16px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}

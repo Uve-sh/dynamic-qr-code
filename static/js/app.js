@@ -1,8 +1,10 @@
 /**
  * Dynamic QR Code Studio - Frontend Controller
+ * With Multi-User Isolation & Authentication
  */
 
 // State
+let currentUser = null;
 let allQRCodes = [];
 let activeConfig = {};
 let selectedColor = '#000000';
@@ -25,6 +27,7 @@ const statTotalOrders = document.getElementById('statTotalOrders');
 const createModal = document.getElementById('createModal');
 const editModal = document.getElementById('editModal');
 const configModal = document.getElementById('configModal');
+const authModal = document.getElementById('authModal');
 
 // Create Modal Inputs
 const inputQrId = document.getElementById('inputQrId');
@@ -38,12 +41,43 @@ const createPreviewImg = document.getElementById('createPreviewImg');
 const createPreviewPlaceholder = document.getElementById('createPreviewPlaceholder');
 const createPreviewUrl = document.getElementById('createPreviewUrl');
 
+// ==================== AUTH TOKEN & API FETCH WRAPPER ====================
+
+function getAuthToken() {
+  return localStorage.getItem('qr_token') || '';
+}
+
+function setAuthToken(token) {
+  if (token) {
+    localStorage.setItem('qr_token', token);
+  } else {
+    localStorage.removeItem('qr_token');
+  }
+}
+
+async function authFetch(url, options = {}) {
+  const headers = options.headers || {};
+  const token = getAuthToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  options.headers = headers;
+
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    setAuthToken(null);
+    currentUser = null;
+    updateAuthUI();
+    renderUnauthenticatedEmptyState();
+    throw new Error('Authentication required');
+  }
+  return res;
+}
+
 // --- Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
   initEventListeners();
-  loadConfig();
-  loadStats();
-  loadQRCodes();
+  checkAuthSession();
 });
 
 function initEventListeners() {
@@ -52,12 +86,23 @@ function initEventListeners() {
   statusFilter.addEventListener('change', renderFilteredList);
   sortFilter.addEventListener('change', renderFilteredList);
   btnRefresh.addEventListener('click', () => {
-    loadStats();
-    loadQRCodes();
+    if (currentUser) {
+      loadStats();
+      loadQRCodes();
+    } else {
+      openAuthModal();
+    }
   });
 
   // Modal Open/Close
-  document.getElementById('btnOpenCreate').addEventListener('click', openCreateModal);
+  document.getElementById('btnOpenCreate').addEventListener('click', () => {
+    if (!currentUser) {
+      showToast('Please sign in to create QR codes', 'info');
+      openAuthModal();
+      return;
+    }
+    openCreateModal();
+  });
   document.getElementById('btnCloseCreate').addEventListener('click', closeCreateModal);
   document.getElementById('btnCancelCreate').addEventListener('click', closeCreateModal);
   document.getElementById('btnSubmitCreate').addEventListener('click', handleCreateQRCode);
@@ -66,10 +111,44 @@ function initEventListeners() {
   document.getElementById('btnCancelEdit').addEventListener('click', closeEditModal);
   document.getElementById('btnSaveEdit').addEventListener('click', handleSaveEdit);
 
-  document.getElementById('btnOpenConfig').addEventListener('click', openConfigModal);
+  document.getElementById('btnOpenConfig').addEventListener('click', () => {
+    if (!currentUser) {
+      openAuthModal();
+      return;
+    }
+    openConfigModal();
+  });
   document.getElementById('btnCloseConfig').addEventListener('click', closeConfigModal);
   document.getElementById('btnCancelConfig').addEventListener('click', closeConfigModal);
   document.getElementById('btnSaveConfig').addEventListener('click', handleSaveConfig);
+
+  // Auth Modal Listeners
+  document.getElementById('btnOpenAuth').addEventListener('click', openAuthModal);
+  document.getElementById('btnCloseAuth').addEventListener('click', closeAuthModal);
+  document.getElementById('btnLogout').addEventListener('click', handleLogout);
+
+  // Auth Tabs
+  const tabSignIn = document.getElementById('tabSignIn');
+  const tabSignUp = document.getElementById('tabSignUp');
+  const formSignIn = document.getElementById('formSignIn');
+  const formSignUp = document.getElementById('formSignUp');
+
+  tabSignIn.addEventListener('click', () => {
+    tabSignIn.classList.add('active');
+    tabSignUp.classList.remove('active');
+    formSignIn.style.display = 'block';
+    formSignUp.style.display = 'none';
+  });
+
+  tabSignUp.addEventListener('click', () => {
+    tabSignUp.classList.add('active');
+    tabSignIn.classList.remove('active');
+    formSignUp.style.display = 'block';
+    formSignIn.style.display = 'none';
+  });
+
+  formSignIn.addEventListener('submit', handleLogin);
+  formSignUp.addEventListener('submit', handleRegister);
 
   // Auto-generate QRID
   document.getElementById('btnAutoGenerateQrId').addEventListener('click', fetchSuggestedQrId);
@@ -102,11 +181,15 @@ function initEventListeners() {
   });
 
   document.getElementById('btnUseLocalhost').addEventListener('click', () => {
-    document.getElementById('configBaseUrl').value = window.location.origin;
+    document.getElementById('configBaseUrl').value = 'http://localhost:8000';
   });
 
-  // Batch PDF Sheet
+  // Batch PDF Button
   document.getElementById('btnBatchPdf').addEventListener('click', () => {
+    if (!currentUser) {
+      openAuthModal();
+      return;
+    }
     const searchVal = encodeURIComponent(searchInput.value.trim());
     window.open(`/api/batch/pdf?search=${searchVal}`, '_blank');
   });
@@ -119,11 +202,186 @@ function initEventListeners() {
   });
 }
 
+// ==================== AUTHENTICATION FLOW ====================
+
+async function checkAuthSession() {
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: {
+        'Authorization': `Bearer ${getAuthToken()}`
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.authenticated && data.user) {
+        currentUser = data.user;
+        updateAuthUI();
+        loadConfig();
+        loadStats();
+        loadQRCodes();
+        return;
+      }
+    }
+  } catch (err) {
+    console.error('Session check failed:', err);
+  }
+
+  // Not authenticated
+  currentUser = null;
+  updateAuthUI();
+  renderUnauthenticatedEmptyState();
+  openAuthModal();
+}
+
+function updateAuthUI() {
+  const guestSec = document.getElementById('authGuestSection');
+  const userSec = document.getElementById('authUserSection');
+  const userNameDisplay = document.getElementById('userNameDisplay');
+  const userAvatar = document.getElementById('userAvatar');
+  const userRoleBadge = document.getElementById('userRoleBadge');
+
+  if (currentUser) {
+    guestSec.style.display = 'none';
+    userSec.style.display = 'inline-flex';
+    userNameDisplay.textContent = currentUser.full_name || currentUser.username;
+    userAvatar.textContent = (currentUser.username || 'U')[0].toUpperCase();
+    userRoleBadge.textContent = currentUser.role || 'Member';
+  } else {
+    guestSec.style.display = 'inline-block';
+    userSec.style.display = 'none';
+  }
+}
+
+function openAuthModal() {
+  authModal.classList.add('active');
+}
+
+function closeAuthModal() {
+  // Only allow closing if already logged in
+  if (currentUser) {
+    authModal.classList.remove('active');
+  } else {
+    showToast('Please sign in or create an account to continue.', 'info');
+  }
+}
+
+async function handleLogin(e) {
+  if (e) e.preventDefault();
+  const identifier = document.getElementById('loginIdentifier').value.trim();
+  const password = document.getElementById('loginPassword').value;
+
+  if (!identifier || !password) {
+    showToast('Please fill in both fields', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setAuthToken(data.token);
+      currentUser = data.user;
+      updateAuthUI();
+      authModal.classList.remove('active');
+      showToast(`Welcome back, ${currentUser.username}!`, 'success');
+      loadConfig();
+      loadStats();
+      loadQRCodes();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Sign in failed', 'error');
+    }
+  } catch (err) {
+    showToast('Connection error during sign in', 'error');
+  }
+}
+
+async function handleRegister(e) {
+  if (e) e.preventDefault();
+  const username = document.getElementById('regUsername').value.trim();
+  const full_name = document.getElementById('regFullName').value.trim();
+  const email = document.getElementById('regEmail').value.trim();
+  const password = document.getElementById('regPassword').value;
+
+  if (!username || !email || !password) {
+    showToast('Please fill in all required fields', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, full_name, email, password })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      setAuthToken(data.token);
+      currentUser = data.user;
+      updateAuthUI();
+      authModal.classList.remove('active');
+      showToast(`Account created! Welcome, ${currentUser.username}!`, 'success');
+      loadConfig();
+      loadStats();
+      loadQRCodes();
+    } else {
+      const err = await res.json();
+      showToast(err.detail || 'Registration failed', 'error');
+    }
+  } catch (err) {
+    showToast('Connection error during registration', 'error');
+  }
+}
+
+async function handleLogout() {
+  try {
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` }
+    });
+  } catch (err) {
+    // Ignore error
+  }
+  setAuthToken(null);
+  currentUser = null;
+  updateAuthUI();
+  allQRCodes = [];
+  statTotalQr.textContent = '0';
+  statActiveQr.textContent = '0';
+  statTotalScans.textContent = '0';
+  statTotalOrders.textContent = '0';
+  renderUnauthenticatedEmptyState();
+  openAuthModal();
+  showToast('Logged out successfully', 'info');
+}
+
+function renderUnauthenticatedEmptyState() {
+  qrGrid.innerHTML = `
+    <div class="empty-state" style="grid-column: 1 / -1; padding: 4rem 2rem;">
+      <div class="empty-icon">🔐</div>
+      <h3 style="font-size: 1.4rem; margin-bottom: 0.5rem;">Private Team Workspace</h3>
+      <p style="color: var(--text-secondary); max-width: 460px; margin: 0 auto 1.5rem auto;">
+        Sign in to your private account to manage your own dynamic QR codes, track customer scans, and download print-ready assets.
+      </p>
+      <button class="btn btn-primary" onclick="openAuthModal()" style="margin: 0 auto;">
+        <span>🔑</span> Sign In / Create Account
+      </button>
+    </div>
+  `;
+}
+
 // ==================== DATA FETCHING ====================
 
 async function loadStats() {
+  if (!currentUser) return;
   try {
-    const res = await fetch('/api/stats');
+    const res = await authFetch('/api/stats');
     if (res.ok) {
       const data = await res.json();
       statTotalQr.textContent = data.total_qr || 0;
@@ -137,8 +395,9 @@ async function loadStats() {
 }
 
 async function loadConfig() {
+  if (!currentUser) return;
   try {
-    const res = await fetch('/api/config');
+    const res = await authFetch('/api/config');
     if (res.ok) {
       activeConfig = await res.json();
       document.getElementById('lanIpDisplay').textContent = activeConfig.local_ip || 'Auto';
@@ -150,15 +409,20 @@ async function loadConfig() {
 }
 
 async function loadQRCodes() {
+  if (!currentUser) {
+    renderUnauthenticatedEmptyState();
+    return;
+  }
+
   try {
     qrGrid.innerHTML = `
-      <div class="empty-state">
+      <div class="empty-state" style="grid-column: 1 / -1;">
         <div class="empty-icon">⏳</div>
         <h3>Loading Dynamic QR Codes...</h3>
-        <p>Fetching records from local database</p>
+        <p>Fetching your private records</p>
       </div>
     `;
-    const res = await fetch('/api/qrcodes');
+    const res = await authFetch('/api/qrcodes');
     if (res.ok) {
       allQRCodes = await res.json();
       renderFilteredList();
@@ -174,225 +438,203 @@ async function loadQRCodes() {
 // ==================== RENDERING & FILTERING ====================
 
 function renderFilteredList() {
+  if (!currentUser) {
+    renderUnauthenticatedEmptyState();
+    return;
+  }
+
   const searchTerm = searchInput.value.trim().toLowerCase();
   const statusVal = statusFilter.value;
   const sortVal = sortFilter.value;
 
   let filtered = allQRCodes.filter(item => {
-    const matchesSearch = !searchTerm || 
-      item.qr_id.toLowerCase().includes(searchTerm) ||
+    const matchesSearch = !searchTerm ||
+      (item.qr_id && item.qr_id.toLowerCase().includes(searchTerm)) ||
       (item.order_id && item.order_id.toLowerCase().includes(searchTerm)) ||
-      item.title.toLowerCase().includes(searchTerm) ||
-      item.target_url.toLowerCase().includes(searchTerm);
+      (item.title && item.title.toLowerCase().includes(searchTerm)) ||
+      (item.target_url && item.target_url.toLowerCase().includes(searchTerm));
 
     const matchesStatus = !statusVal || item.status === statusVal;
-
     return matchesSearch && matchesStatus;
   });
 
   // Sorting
-  if (sortVal === 'scans') {
-    filtered.sort((a, b) => (b.scan_count || 0) - (a.scan_count || 0));
-  } else if (sortVal === 'order') {
-    filtered.sort((a, b) => (a.order_id || '').localeCompare(b.order_id || ''));
-  } else if (sortVal === 'title') {
-    filtered.sort((a, b) => a.title.localeCompare(b.title));
-  } else {
-    // Newest first (id desc)
-    filtered.sort((a, b) => b.id - a.id);
-  }
+  filtered.sort((a, b) => {
+    if (sortVal === 'newest') return b.id - a.id;
+    if (sortVal === 'scans') return (b.scan_count || 0) - (a.scan_count || 0);
+    if (sortVal === 'order') return (a.order_id || '').localeCompare(b.order_id || '');
+    if (sortVal === 'title') return (a.title || '').localeCompare(b.title || '');
+    return 0;
+  });
 
   if (filtered.length === 0) {
     qrGrid.innerHTML = `
-      <div class="empty-state">
+      <div class="empty-state" style="grid-column: 1 / -1;">
         <div class="empty-icon">🔍</div>
-        <h3>No Dynamic QR Codes Found</h3>
-        <p>${searchTerm ? `No results matching "${searchTerm}". Try a different keyword or filter.` : 'You haven\'t created any dynamic QR codes yet. Click the button below to generate one!'}</p>
-        <button class="btn btn-primary" onclick="openCreateModal()">➕ Create Your First QR Code</button>
+        <h3>No QR Codes Found</h3>
+        <p>${allQRCodes.length === 0 ? "You haven't created any dynamic QR codes yet. Click 'Create Dynamic QR' to get started!" : "No codes matched your filter criteria."}</p>
+        ${allQRCodes.length === 0 ? `<button class="btn btn-primary" onclick="openCreateModal()" style="margin-top: 12px;"><span>➕</span> Create First QR Code</button>` : ''}
       </div>
     `;
     return;
   }
 
-  qrGrid.innerHTML = filtered.map(item => createCardHTML(item)).join('');
-
-  // Attach event handlers to card elements
+  qrGrid.innerHTML = filtered.map(item => renderQRCard(item)).join('');
   attachCardEvents();
 }
 
-function createCardHTML(item) {
-  const isTransparent = item.transparent_bg === 1 || item.transparent_bg === true;
-  const isActive = item.status === 'active';
+function renderQRCard(item) {
+  const isPaused = item.status === 'paused';
   const colorHex = encodeURIComponent(item.color || '#000000');
-  const qrImgSrc = `/api/qrcodes/${item.qr_id}/image?size=280&transparent=true&color=${colorHex}&v=${encodeURIComponent(item.updated_at)}`;
+  const transparentFlag = item.transparent_bg ? 'true' : 'false';
+  const previewImgSrc = `/api/qrcodes/${item.qr_id}/image?size=320&transparent=${transparentFlag}&color=${colorHex}`;
 
   return `
-    <div class="qr-card" data-qrid="${item.qr_id}">
-      <div class="card-header">
-        <div class="card-title-group">
-          <div class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</div>
-          <div class="badges-row">
-            <span class="badge badge-qrid" title="Click to copy QRID" data-action="copy-qrid" data-text="${item.qr_id}">
-              ⚡ ${item.qr_id}
-            </span>
-            ${item.order_id ? `
-              <span class="badge badge-order" title="Order ID (Click to filter)" data-action="filter-order" data-order="${escapeHtml(item.order_id)}">
-                📦 ${escapeHtml(item.order_id)}
-              </span>
-            ` : ''}
-            <span class="badge badge-status ${isActive ? 'active' : 'paused'}">
-              <span class="status-dot ${isActive ? 'active' : 'paused'}"></span>
-              ${isActive ? 'Active' : 'Paused'}
-            </span>
+    <article class="qr-card ${isPaused ? 'paused' : ''}" data-qrid="${escapeHtml(item.qr_id)}">
+      <!-- Card Header -->
+      <div class="qr-card-header">
+        <div class="qr-id-badge">
+          <span class="qr-id-text">${escapeHtml(item.qr_id)}</span>
+          <button class="btn-copy-mini btnCopyQrId" data-text="${escapeHtml(item.qr_id)}" title="Copy QR ID">📋</button>
+        </div>
+        ${item.order_id ? `
+          <div class="order-id-badge" title="Order ID Reference">
+            <span>📦</span> ${escapeHtml(item.order_id)}
           </div>
+        ` : ''}
+        <div class="status-pill ${item.status}">
+          <span class="status-dot"></span>
+          <span>${item.status === 'active' ? 'Active' : 'Paused'}</span>
         </div>
       </div>
 
+      <!-- Card Body Content -->
       <div class="card-content-layout">
-        <!-- Transparent Checkerboard Pattern Preview -->
-        <div class="transparent-canvas-box" title="Transparent QR Code (Alpha Checkerboard)">
-          <img src="${qrImgSrc}" alt="QR ${item.qr_id}" loading="lazy">
+        <!-- Transparent Canvas Preview -->
+        <div class="transparent-canvas-box" title="Transparent Background QR Code">
+          <img src="${previewImgSrc}" alt="QR Code ${escapeHtml(item.qr_id)}" class="qr-image-display" loading="lazy">
         </div>
 
-        <div class="card-links-info">
-          <div class="info-item">
-            <span class="info-label">Dynamic Redirect Link:</span>
-            <div class="redirect-chip" title="Click to copy redirect link" data-action="copy-redirect" data-url="${item.redirect_url}">
-              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">
-                ${item.redirect_url}
-              </span>
-              <span style="opacity: 0.8; margin-left: 6px;">📋</span>
-            </div>
-          </div>
+        <!-- Meta Details -->
+        <div class="card-meta">
+          <h2 class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h2>
 
-          <div class="info-item">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span class="info-label">Destination URL:</span>
-              <button class="btn btn-secondary btn-sm" style="padding: 2px 6px; font-size: 0.72rem;" data-action="edit-dest">
-                ✏️ Edit
-              </button>
-            </div>
-            <a href="${escapeHtml(item.target_url)}" target="_blank" rel="noopener noreferrer" class="url-truncate" title="Open Destination">
-              🔗 ${escapeHtml(item.target_url)}
+          <div class="url-block">
+            <div class="url-label">Redirect Destination (Dynamic)</div>
+            <a href="${escapeHtml(item.target_url)}" target="_blank" rel="noopener noreferrer" class="url-link" title="${escapeHtml(item.target_url)}">
+              <span>🔗</span> <span class="url-text">${escapeHtml(item.target_url)}</span>
             </a>
           </div>
 
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 4px;">
-            <div class="scan-stat-chip">
-              <span>📈 Scans:</span>
-              <strong style="color: #ffffff; font-size: 0.9rem;">${item.scan_count || 0}</strong>
+          <div class="url-block">
+            <div class="url-label">Permanent Dynamic Link</div>
+            <div class="redirect-url-pill">
+              <span class="url-text">${escapeHtml(item.redirect_url || '')}</span>
+              <button class="btn-copy-mini btnCopyUrl" data-text="${escapeHtml(item.redirect_url || '')}" title="Copy Link">📋</button>
             </div>
-            <a href="${item.redirect_url}" target="_blank" class="btn btn-secondary btn-sm" style="font-size: 0.75rem; padding: 3px 8px;" title="Test redirect as scanner">
-              ⚡ Test Scan
-            </a>
+          </div>
+
+          <div class="card-stats-row">
+            <div class="scan-pill" title="Total Scans Recorded">
+              <span>📊</span>
+              <strong>${item.scan_count || 0}</strong>
+              <span>Scans</span>
+            </div>
+            <div class="date-text" title="Created date">
+              Created ${formatDate(item.created_at)}
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="card-actions">
-        <!-- Download Dropdown -->
-        <div class="download-dropdown">
-          <button class="btn btn-primary btn-sm" data-action="toggle-download">
-            <span>💾</span> Download ▼
+      <!-- Card Footer Actions -->
+      <div class="qr-card-footer">
+        <div class="card-actions-left">
+          <button class="btn btn-secondary btn-sm btnEditDestination" data-qrid="${escapeHtml(item.qr_id)}">
+            <span>✏️</span> Edit URL
           </button>
-          <div class="dropdown-menu">
-            <a class="dropdown-item" href="/api/qrcodes/${item.qr_id}/image?size=1024&transparent=true&download=true">
-              <span>🖼️</span> Transparent PNG (1024px)
-            </a>
-            <a class="dropdown-item" href="/api/qrcodes/${item.qr_id}/image?size=2048&transparent=true&download=true">
-              <span>📐</span> Ultra Print PNG (2048px)
-            </a>
-            <a class="dropdown-item" href="/api/qrcodes/${item.qr_id}/svg?download=true">
-              <span>✨</span> Vector SVG (Transparent)
-            </a>
-            <a class="dropdown-item" href="/api/qrcodes/${item.qr_id}/pdf" target="_blank">
-              <span>📄</span> Printable PDF Label Sheet
-            </a>
-          </div>
+          <button class="btn btn-secondary btn-sm btnTogglePause" data-qrid="${escapeHtml(item.qr_id)}" data-status="${item.status}">
+            <span>${isPaused ? '▶️ Resume' : '⏸️ Pause'}</span>
+          </button>
         </div>
 
-        <div style="display: flex; gap: 6px;">
-          <button class="btn btn-secondary btn-sm" data-action="toggle-status" title="${isActive ? 'Pause redirect' : 'Resume redirect'}">
-            ${isActive ? '⏸️ Pause' : '▶️ Resume'}
-          </button>
-          <button class="btn btn-danger-outline btn-sm btn-icon" data-action="delete" title="Delete QR Code">
+        <div class="card-actions-right">
+          <!-- Download Dropdown -->
+          <div class="download-dropdown">
+            <button class="btn btn-primary btn-sm btnToggleDropdown">
+              <span>⬇️</span> Export <span style="font-size: 0.7rem; margin-left: 2px;">▼</span>
+            </button>
+            <div class="dropdown-menu">
+              <a href="/api/qrcodes/${escapeHtml(item.qr_id)}/image?size=2048&transparent=true&download=true" class="dropdown-item" download>
+                <span>🖼️</span> High-Res PNG (Transparent)
+              </a>
+              <a href="/api/qrcodes/${escapeHtml(item.qr_id)}/svg?download=true" class="dropdown-item" download>
+                <span>📐</span> Vector SVG (Infinite Scale)
+              </a>
+              <a href="/api/qrcodes/${escapeHtml(item.qr_id)}/pdf" class="dropdown-item" target="_blank">
+                <span>📄</span> Printable Label PDF
+              </a>
+            </div>
+          </div>
+
+          <button class="btn btn-danger-icon btnDelete" data-qrid="${escapeHtml(item.qr_id)}" title="Delete QR Code">
             🗑️
           </button>
         </div>
       </div>
-    </div>
+    </article>
   `;
 }
 
 function attachCardEvents() {
-  document.querySelectorAll('.qr-card').forEach(card => {
-    const qrId = card.dataset.qrid;
-    const item = allQRCodes.find(q => q.qr_id === qrId);
-    if (!item) return;
-
-    // Copy QRID
-    card.querySelectorAll('[data-action="copy-qrid"]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        copyToClipboard(item.qr_id, `Copied QRID: ${item.qr_id}`);
-      });
+  document.querySelectorAll('.btnCopyQrId').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyToClipboard(btn.dataset.text, `Copied QR ID: ${btn.dataset.text}`);
     });
+  });
 
-    // Filter by Order ID
-    card.querySelectorAll('[data-action="filter-order"]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const order = el.dataset.order;
-        searchInput.value = order;
-        renderFilteredList();
-      });
+  document.querySelectorAll('.btnCopyUrl').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyToClipboard(btn.dataset.text, 'Dynamic redirect link copied to clipboard!');
     });
+  });
 
-    // Copy Redirect Link
-    card.querySelectorAll('[data-action="copy-redirect"]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        copyToClipboard(item.redirect_url, 'Copied Dynamic Redirect URL to clipboard!');
-      });
+  document.querySelectorAll('.btnEditDestination').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qrId = btn.dataset.qrid;
+      const item = allQRCodes.find(q => q.qr_id === qrId);
+      if (item) openEditModal(item);
     });
+  });
 
-    // Edit Destination
-    card.querySelectorAll('[data-action="edit-dest"]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openEditModal(item);
-      });
+  document.querySelectorAll('.btnTogglePause').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qrId = btn.dataset.qrid;
+      const current = btn.dataset.status;
+      const newStatus = current === 'active' ? 'paused' : 'active';
+      updateQRStatus(qrId, newStatus);
     });
+  });
 
-    // Download dropdown toggle
-    card.querySelectorAll('[data-action="toggle-download"]').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const dropdown = btn.parentElement.querySelector('.dropdown-menu');
-        document.querySelectorAll('.dropdown-menu').forEach(m => {
-          if (m !== dropdown) m.classList.remove('show');
-        });
-        dropdown.classList.toggle('show');
-      });
+  document.querySelectorAll('.btnDelete').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const qrId = btn.dataset.qrid;
+      if (confirm(`Are you sure you want to permanently delete dynamic QR code ${qrId}? Scanners will hit a 404 page.`)) {
+        deleteQRCode(qrId);
+      }
     });
+  });
 
-    // Toggle status (Active / Paused)
-    card.querySelectorAll('[data-action="toggle-status"]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const newStatus = item.status === 'active' ? 'paused' : 'active';
-        await updateQRStatus(item.qr_id, newStatus);
+  document.querySelectorAll('.btnToggleDropdown').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = btn.nextElementSibling;
+      document.querySelectorAll('.dropdown-menu').forEach(m => {
+        if (m !== menu) m.classList.remove('show');
       });
-    });
-
-    // Delete
-    card.querySelectorAll('[data-action="delete"]').forEach(btn => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (confirm(`Are you sure you want to delete dynamic QR code "${item.qr_id}" (${item.title})?`)) {
-          await deleteQRCode(item.qr_id);
-        }
-      });
+      menu.classList.toggle('show');
     });
   });
 }
@@ -417,7 +659,7 @@ function closeCreateModal() {
 
 async function fetchSuggestedQrId() {
   try {
-    const res = await fetch('/api/suggest-id');
+    const res = await authFetch('/api/suggest-id');
     if (res.ok) {
       const data = await res.json();
       inputQrId.value = data.suggested_id;
@@ -468,7 +710,7 @@ async function handleCreateQRCode() {
   }
 
   try {
-    const res = await fetch('/api/qrcodes', {
+    const res = await authFetch('/api/qrcodes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -529,7 +771,7 @@ async function handleSaveEdit() {
   }
 
   try {
-    const res = await fetch(`/api/qrcodes/${activeEditQrId}`, {
+    const res = await authFetch(`/api/qrcodes/${activeEditQrId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -557,7 +799,7 @@ async function handleSaveEdit() {
 
 async function updateQRStatus(qrId, newStatus) {
   try {
-    const res = await fetch(`/api/qrcodes/${qrId}`, {
+    const res = await authFetch(`/api/qrcodes/${qrId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus })
@@ -574,7 +816,7 @@ async function updateQRStatus(qrId, newStatus) {
 
 async function deleteQRCode(qrId) {
   try {
-    const res = await fetch(`/api/qrcodes/${qrId}`, { method: 'DELETE' });
+    const res = await authFetch(`/api/qrcodes/${qrId}`, { method: 'DELETE' });
     if (res.ok) {
       showToast(`Deleted ${qrId}`, 'success');
       loadStats();
@@ -604,7 +846,7 @@ async function handleSaveConfig() {
   }
 
   try {
-    const res = await fetch('/api/config', {
+    const res = await authFetch('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base_url })
@@ -647,6 +889,16 @@ function fallbackCopy(text, message) {
     showToast('Copy failed, please copy manually', 'error');
   }
   document.body.removeChild(textArea);
+}
+
+function formatDate(isoStr) {
+  if (!isoStr) return '';
+  try {
+    const d = new Date(isoStr);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return isoStr;
+  }
 }
 
 function showToast(message, type = 'info') {
