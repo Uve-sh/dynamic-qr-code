@@ -492,19 +492,23 @@ function renderQRCard(item) {
   return `
     <article class="qr-card ${isPaused ? 'paused' : ''}" data-qrid="${escapeHtml(item.qr_id)}">
       <!-- Card Header -->
-      <div class="qr-card-header">
-        <div class="qr-id-badge">
-          <span class="qr-id-text">${escapeHtml(item.qr_id)}</span>
-          <button class="btn-copy-mini btnCopyQrId" data-text="${escapeHtml(item.qr_id)}" title="Copy QR ID">📋</button>
-        </div>
-        ${item.order_id ? `
-          <div class="order-id-badge" title="Order ID Reference">
-            <span>📦</span> ${escapeHtml(item.order_id)}
+      <div class="card-header">
+        <div class="card-title-group">
+          <h3 class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h3>
+          <div class="badges-row">
+            <span class="badge badge-qrid btnCopyQrId" data-text="${escapeHtml(item.qr_id)}" title="Click to copy QR ID">
+              ${escapeHtml(item.qr_id)} 📋
+            </span>
+            ${item.order_id ? `
+              <span class="badge badge-order" title="Order ID Reference">
+                📦 ${escapeHtml(item.order_id)}
+              </span>
+            ` : ''}
+            <span class="badge badge-status ${item.status}">
+              <span class="status-dot ${item.status}"></span>
+              ${item.status === 'active' ? 'Active' : 'Paused'}
+            </span>
           </div>
-        ` : ''}
-        <div class="status-pill ${item.status}">
-          <span class="status-dot"></span>
-          <span>${item.status === 'active' ? 'Active' : 'Paused'}</span>
         </div>
       </div>
 
@@ -515,41 +519,36 @@ function renderQRCard(item) {
           <img src="${previewImgSrc}" alt="QR Code ${escapeHtml(item.qr_id)}" class="qr-image-display" loading="lazy">
         </div>
 
-        <!-- Meta Details -->
-        <div class="card-meta">
-          <h2 class="card-title" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</h2>
-
-          <div class="url-block">
-            <div class="url-label">Redirect Destination (Dynamic)</div>
-            <a href="${escapeHtml(item.target_url)}" target="_blank" rel="noopener noreferrer" class="url-link" title="${escapeHtml(item.target_url)}">
-              <span>🔗</span> <span class="url-text">${escapeHtml(item.target_url)}</span>
+        <!-- Links & Meta -->
+        <div class="card-links-info">
+          <div class="info-item">
+            <span class="info-label">Redirect Destination (Dynamic)</span>
+            <a href="${escapeHtml(item.target_url)}" target="_blank" rel="noopener noreferrer" class="url-truncate" title="${escapeHtml(item.target_url)}">
+              🔗 ${escapeHtml(item.target_url)}
             </a>
           </div>
 
-          <div class="url-block">
-            <div class="url-label">Permanent Dynamic Link</div>
-            <div class="redirect-url-pill">
-              <span class="url-text">${escapeHtml(item.redirect_url || '')}</span>
-              <button class="btn-copy-mini btnCopyUrl" data-text="${escapeHtml(item.redirect_url || '')}" title="Copy Link">📋</button>
+          <div class="info-item">
+            <span class="info-label">Permanent Dynamic Link</span>
+            <div class="redirect-chip btnCopyUrl" data-text="${escapeHtml(item.redirect_url || '')}" title="Click to copy dynamic scan URL">
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.redirect_url || '')}</span>
+              <span style="margin-left: 6px; flex-shrink: 0;">📋</span>
             </div>
           </div>
 
-          <div class="card-stats-row">
-            <div class="scan-pill" title="Total Scans Recorded">
-              <span>📊</span>
-              <strong>${item.scan_count || 0}</strong>
-              <span>Scans</span>
-            </div>
-            <div class="date-text" title="Created date">
-              Created ${formatDate(item.created_at)}
+          <div class="info-item">
+            <div class="scan-stat-chip">
+              <span>📊 <strong>${item.scan_count || 0}</strong> scans</span>
+              <span>&bull;</span>
+              <span>Created ${formatDate(item.created_at)}</span>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Card Footer Actions -->
-      <div class="qr-card-footer">
-        <div class="card-actions-left">
+      <div class="card-actions">
+        <div style="display: flex; gap: 8px; align-items: center;">
           <button class="btn btn-secondary btn-sm btnEditDestination" data-qrid="${escapeHtml(item.qr_id)}">
             <span>✏️</span> Edit URL
           </button>
@@ -558,11 +557,11 @@ function renderQRCard(item) {
           </button>
         </div>
 
-        <div class="card-actions-right">
+        <div style="display: flex; gap: 8px; align-items: center;">
           <!-- Download Dropdown -->
           <div class="download-dropdown">
             <button class="btn btn-primary btn-sm btnToggleDropdown">
-              <span>⬇️</span> Export <span style="font-size: 0.7rem; margin-left: 2px;">▼</span>
+              <span>⬇️</span> Export <span style="font-size: 0.65rem; margin-left: 2px;">▼</span>
             </button>
             <div class="dropdown-menu">
               <a href="/api/qrcodes/${escapeHtml(item.qr_id)}/image?size=2048&transparent=true&download=true" class="dropdown-item" download>
@@ -577,7 +576,7 @@ function renderQRCard(item) {
             </div>
           </div>
 
-          <button class="btn btn-danger-icon btnDelete" data-qrid="${escapeHtml(item.qr_id)}" title="Delete QR Code">
+          <button class="btn btn-danger-outline btn-sm btnDelete" data-qrid="${escapeHtml(item.qr_id)}" title="Delete QR Code">
             🗑️
           </button>
         </div>
